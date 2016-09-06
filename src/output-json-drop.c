@@ -71,6 +71,9 @@ typedef struct JsonDropLogThread_ {
     MemBuffer *buffer;
 } JsonDropLogThread;
 
+/* default to true as this has been the default behavior for a long time */
+static int g_droplog_flows_start = 1;
+
 /**
  * \brief   Log the dropped packets in netfilter format when engine is running
  *          in inline mode
@@ -282,6 +285,17 @@ static OutputCtx *JsonDropLogInitCtx(ConfNode *conf)
                 drop_ctx->flags = LOG_DROP_ALERTS;
             }
         }
+        extended = ConfNodeLookupChildValue(conf, "flow");
+        if (extended != NULL) {
+            if (strcasecmp(extended, "start")) {
+                g_droplog_flows_start = 1;
+            } else if (strcasecmp(extended, "all")) {
+                g_droplog_flows_start = 0;
+            } else {
+                SCLogWarning(SC_ERR_CONF_YAML_ERROR, "valid options for "
+                        "'flow' are 'start' and 'all'");
+            }
+        }
     }
 
     output_ctx->data = drop_ctx;
@@ -341,6 +355,9 @@ static int JsonDropLogger(ThreadVars *tv, void *thread_data, const Packet *p)
     if (r < 0)
         return -1;
 
+    if (!g_droplog_flows_start)
+        return 0;
+
     if (p->flow) {
         FLOWLOCK_RDLOCK(p->flow);
         if (p->flow->flags & FLOW_ACTION_DROP) {
@@ -374,7 +391,7 @@ static int JsonDropLogCondition(ThreadVars *tv, const Packet *p)
         return FALSE;
     }
 
-    if (p->flow != NULL) {
+    if (g_droplog_flows_start && p->flow != NULL) {
         int ret = FALSE;
 
         /* for a flow that will be dropped fully, log just once per direction */
